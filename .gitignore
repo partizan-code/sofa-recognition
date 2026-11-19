@@ -1,0 +1,43 @@
+# Python and build artifacts
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Environments and local configuration
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+mise.local.toml
+
+# Testing and editors
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.vscode/
+.idea/
+*.swp
+
+# Runtime data and secrets
+*.log
+logs/
+data/
+tmp/
+.cache/
+*.sqlite
+*.sqlite3
+*.db
+
+# Operating systems
+.DS_Store
+Thumbs.db

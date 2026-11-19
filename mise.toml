@@ -1,0 +1,47 @@
+# mise selects Python and activates .venv; uv creates and synchronizes it.
+[tools]
+python = "3.13"
+
+[settings]
+python.uv_venv_auto = "source"
+task.run_auto_install = false
+
+[env]
+UV_PYTHON = { value = "{{ tools.python.path }}/{% if os() == 'windows' %}python.exe{% else %}bin/python3{% endif %}", tools = true }
+UV_PYTHON_DOWNLOADS = "never"
+
+[tasks.setup]
+description = "Install locked dependencies into the project .venv"
+run = "uv sync --locked"
+
+[tasks.start]
+description = "Run the local application without dependency synchronization"
+run = "uv run --no-sync --no-env-file python -B -m streamlit run main.py --server.address 127.0.0.1 --browser.gatherUsageStats false"
+
+[tasks.lint]
+description = "Check Python code without applying fixes"
+run = "uv run --no-sync --no-env-file ruff check --no-cache ."
+
+[tasks.lint-fix]
+description = "Apply safe Ruff fixes to Python code"
+run = "uv run --no-sync --no-env-file ruff check --fix ."
+
+[tasks.format]
+description = "Format Python code"
+run = "uv run --no-sync --no-env-file ruff format ."
+
+[tasks.format-check]
+description = "Check Python formatting without changing files"
+run = "uv run --no-sync --no-env-file ruff format --check --no-cache ."
+
+[tasks.test]
+description = "Run offline smoke tests without cache files"
+run = "uv run --no-sync --no-env-file python -B -m pytest -p no:cacheprovider -q"
+
+[tasks.check]
+description = "Run lint, formatting checks and offline tests in sequence"
+run = [
+  "uv run --no-sync --no-env-file ruff check --no-cache .",
+  "uv run --no-sync --no-env-file ruff format --check --no-cache .",
+  "uv run --no-sync --no-env-file python -B -m pytest -p no:cacheprovider -q",
+]
