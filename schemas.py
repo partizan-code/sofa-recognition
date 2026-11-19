@@ -2,10 +2,11 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+import config
 
 Configuration = Literal["Прямой", "Угловой", "П-образный"]
-Orientation = Literal["Левая", "Правая"]
 MODES = (
     "Vision Only",
     "Cohere Embeddings",
@@ -18,15 +19,15 @@ MODES = (
 class Prediction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model: str | None
-    color: str | None
+    color: str | None = Field(json_schema_extra={"enum": [*config.COLOR_PALETTE, None]})
     configuration: Configuration | None
-    orientation: Orientation | None
 
-    @model_validator(mode="after")
-    def applicable_orientation(self) -> "Prediction":
-        if self.configuration != "Угловой":
-            self.orientation = None
-        return self
+    @field_validator("color")
+    @classmethod
+    def palette_color(cls, value: str | None) -> str | None:
+        if value is not None and value not in config.COLOR_PALETTE:
+            raise ValueError("color must be a palette name or null")
+        return value
 
 
 class VisionDecision(BaseModel):
@@ -41,7 +42,6 @@ class Photo(BaseModel):
     model: str | None = None
     color: str | None = None
     configuration: Configuration | None = Field(default=None, alias="type")
-    orientation: Orientation | None = None
 
     @field_validator("name_file")
     @classmethod

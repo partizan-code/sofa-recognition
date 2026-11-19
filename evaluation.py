@@ -8,10 +8,10 @@ from uuid import uuid4
 
 import config
 from recognition import Settings
-from schemas import Photo, Recognition
+from schemas import Photo, Prediction, Recognition
 from storage import file_digest, read_json, write_json
 
-FIELDS = ("model", "color", "configuration", "orientation")
+FIELDS = ("model", "color", "configuration")
 
 
 def equivalent(first: str | None, second: str | None) -> bool:
@@ -56,9 +56,16 @@ def save_run(
 
 
 def load_runs(directory: Path = config.RESULTS_DIR) -> list[dict]:
-    return sorted(
+    runs = sorted(
         (read_json(path) for path in directory.glob("*.json")), key=lambda row: row["created"]
     )
+    # Project historical records onto the current schema without rewriting the archive.
+    for run in runs:
+        run["photo"] = {k: v for k, v in run["photo"].items() if k in Photo.model_fields}
+        run["result"]["prediction"] = {
+            k: v for k, v in run["result"]["prediction"].items() if k in Prediction.model_fields
+        }
+    return runs
 
 
 def summarize(runs: list[dict], *, common_only: bool = False) -> list[dict]:

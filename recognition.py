@@ -37,6 +37,7 @@ def experiment_key(settings: Settings, photos: list[Photo], root: Path) -> str:
         options.pop("embedding_model")
     if settings.vision:
         options.pop("threshold")
+        options["color_palette"] = config.COLOR_PALETTE
     if not settings.vision:
         options.pop("vision_model")
         options.pop("prompt")
@@ -68,7 +69,7 @@ def recognize(
     source_hash = file_digest(source)
     eligible = [p for p in photos if file_digest(root / p.name_file) != source_hash]
     calls, candidates = [], []
-    prediction = Prediction(model=None, color=None, configuration=None, orientation=None)
+    prediction = Prediction(model=None, color=None, configuration=None)
     if settings.provider:
         index = load_index(photos, root, settings.provider, settings.embedding_model, index_dir)
         with OpenRouterEmbeddings(settings.embedding_model, cache_dir, force=force) as client:

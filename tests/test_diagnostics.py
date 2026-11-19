@@ -36,7 +36,6 @@ def test_validation_details_omit_input():
                 "model": None,
                 "color": None,
                 "configuration": "private-invalid-value",
-                "orientation": None,
             }
         )
     message = error_message(caught.value)

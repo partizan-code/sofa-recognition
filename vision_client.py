@@ -33,7 +33,11 @@ class OpenRouterVision(OpenRouterClient):
                 {
                     "role": "system",
                     "content": prompt + "\nВыбирай модель только из подписанных "
-                    "эталонов либо null. ranked_models — ранжирование эталонов, не уверенность.",
+                    "эталонов либо null. ranked_models — ранжирование эталонов, не уверенность."
+                    "\nЦвет определяй только по исходному фото. Выбери ближайший уверенно "
+                    "подходящий цвет из палитры, используя точное название без дополнений; "
+                    "если цвет нельзя уверенно определить, верни null. Палитра: "
+                    + json.dumps(config.COLOR_PALETTE, ensure_ascii=False),
                 },
                 {"role": "user", "content": content},
             ],

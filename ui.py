@@ -31,7 +31,7 @@ def error_message(error: Exception) -> str:
     elif isinstance(error, httpx.RequestError):
         message = f"OpenRouter: {type(error).__name__}: ошибка соединения или таймаут."
     elif isinstance(error, ValidationError):
-        fields = {"prediction", "model", "color", "configuration", "orientation", "ranked_models"}
+        fields = {"prediction", "model", "color", "configuration", "ranked_models"}
         issues = []
         for issue in error.errors(include_input=False, include_context=False, include_url=False)[
             :5
@@ -73,9 +73,12 @@ def sidebar() -> tuple[Settings, dict[str, str], bool]:
             st.form_submit_button("Применить настройки")
         st.caption(
             "Cosine — сходство, не вероятность. Порог нужно подобрать на тестах. "
-            "В Embeddings цвет, конфигурация и ориентация остаются null."
+            "В Embeddings цвет и конфигурация остаются null."
         )
-        st.caption("Ориентация указана со стороны наблюдателя перед диваном.")
+        with st.expander(f"Палитра цветов · {len(config.COLOR_PALETTE)}"):
+            st.write(", ".join(config.COLOR_PALETTE))
+            st.caption("Vision выбирает одно точное название из палитры либо null.")
+            st.markdown(f"[Источник: lexs / reference!A2:A34]({config.COLOR_PALETTE_SOURCE})")
     models = {"Cohere": cohere.strip(), "Voyage": voyage.strip()}
     provider = next((p for p in models if mode.startswith(p)), "Voyage")
     return (

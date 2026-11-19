@@ -13,9 +13,9 @@ import config
 from catalog import load_photos
 from embedding_client import OpenRouterEmbeddings, normalize
 from evaluation import load_runs, save_run, summarize
-from recognition import Settings, recognize
+from recognition import Settings, experiment_key, recognize
 from schemas import CallStats, Candidate, Photo, Prediction, Recognition, VisionDecision
-from storage import file_digest, write_json
+from storage import file_digest, read_json, write_json
 from vector_index import VectorIndex, build_index, index_path, load_index
 
 
@@ -43,9 +43,8 @@ def transport(monkeypatch, decision=None):
             value = decision or {
                 "prediction": {
                     "model": "A",
-                    "color": "Жёлтый",
+                    "color": "Желтый",
                     "configuration": "Прямой",
-                    "orientation": None,
                 },
                 "ranked_models": ["A", "B"],
             }
@@ -147,12 +146,17 @@ def test_five_modes_and_vision_cache(monkeypatch, tmp_path, dataset, mode):
     assert result.prediction.model == "A"
     assert len({c.model for c in result.candidates}) == len(result.candidates)
     if options.vision:
-        assert result.prediction.color == "Жёлтый"
+        assert result.prediction.color == "Желтый"
         payload = next(p for p in requests if "messages" in p)
         assert payload["response_format"]["json_schema"]["strict"]
-        text = json.dumps(payload["messages"], ensure_ascii=False)
+        text = json.dumps(payload["messages"][1]["content"], ensure_ascii=False)
         assert "Красный" not in text  # no ground truth sent to vision
         assert "query.png" not in text
+        assert all(color in payload["messages"][0]["content"] for color in config.COLOR_PALETTE)
+        color_schema = payload["response_format"]["json_schema"]["schema"]["$defs"]["Prediction"][
+            "properties"
+        ]["color"]
+        assert color_schema["enum"] == [*config.COLOR_PALETTE, None]
         assert (
             len([part for part in payload["messages"][1]["content"] if part["type"] == "image_url"])
             == 3
@@ -196,7 +200,6 @@ def test_hallucinated_model_is_not_cached(monkeypatch, tmp_path, dataset):
             "model": "Invented",
             "color": None,
             "configuration": None,
-            "orientation": None,
         },
         "ranked_models": ["A"],
     }
@@ -207,17 +210,57 @@ def test_hallucinated_model_is_not_cached(monkeypatch, tmp_path, dataset):
     assert not list((tmp_path / "cache").glob("*.json"))
 
 
-def test_nulls_schema_and_orientation():
-    prediction = Prediction(model=None, color=None, configuration="Прямой", orientation="Левая")
-    assert prediction.orientation is None
+def test_nullable_prediction_schema_has_only_supported_fields():
+    prediction = Prediction(model=None, color=None, configuration=None)
+    assert prediction.model_dump() == {"model": None, "color": None, "configuration": None}
     schema = VisionDecision.model_json_schema()
     assert schema["additionalProperties"] is False
     assert set(schema["$defs"]["Prediction"]["required"]) == {
         "model",
         "color",
         "configuration",
-        "orientation",
     }
+    assert set(schema["$defs"]["Prediction"]["properties"]) == {"model", "color", "configuration"}
+
+
+def test_palette_accepts_exact_names_and_null_only():
+    assert len(config.COLOR_PALETTE) == len(set(config.COLOR_PALETTE)) == 33
+    for color in (*config.COLOR_PALETTE, None):
+        assert Prediction(model=None, color=color, configuration=None).color == color
+    for color in ("Молочный", "Светло-серый", "Жёлтый", "серый", ""):
+        with pytest.raises(ValueError, match="palette"):
+            Prediction(model=None, color=color, configuration=None)
+
+
+def test_color_outside_palette_is_not_cached_even_with_custom_prompt(
+    monkeypatch, tmp_path, dataset
+):
+    decision = {
+        "prediction": {"model": "A", "color": "Молочный", "configuration": None},
+        "ranked_models": ["A"],
+    }
+    requests = transport(monkeypatch, decision)
+    photos, source = dataset
+    settings = Settings(prompt="Назови цвет Молочный.")
+    for _ in range(2):
+        with pytest.raises(ValueError, match="palette"):
+            recognize(source, photos, tmp_path, settings, cache_dir=tmp_path / "cache")
+    assert len(requests) == 2
+    assert "Палитра:" in requests[0]["messages"][0]["content"]
+    assert not list((tmp_path / "cache").glob("*.json"))
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ["Vision Only", "Cohere Embeddings", "Voyage Embeddings", "Cohere + Vision", "Voyage + Vision"],
+)
+def test_palette_changes_vision_experiment_only(monkeypatch, tmp_path, dataset, mode):
+    photos, _ = dataset
+    settings = Settings(mode=mode)
+    original = experiment_key(settings, photos, tmp_path)
+    monkeypatch.setattr(config, "COLOR_PALETTE", (*config.COLOR_PALETTE, "Новый цвет"))
+    changed = experiment_key(settings, photos, tmp_path)
+    assert (changed != original) == settings.vision
 
 
 def test_manifest_paths_and_optional_ground_truth(tmp_path):
@@ -239,12 +282,35 @@ def test_evaluation_deduplicates_and_counts_unknown_cost(monkeypatch, tmp_path, 
     save_run(photo, source, settings, cached, tmp_path / "runs")
     row = summarize(load_runs(tmp_path / "runs"))[0]
     assert row["Фото"] == 1 and row["model accuracy"] == 1 and row["color accuracy"] == 0
-    assert row["orientation N"] == 0 and row["orientation accuracy"] is None
+    assert {key for key in row if key.endswith(" N")} == {"model N", "color N", "configuration N"}
     assert row["API запусков"] == 1 and row["Известные расходы, USD"] == 0.02
     result.calls[0].cost_usd = None
     assert result.cost_usd is None
     result.calls[0].cached = True
     assert result.cost_usd == 0
+
+
+def test_historical_results_use_current_fields_without_rewriting_archive(
+    monkeypatch, tmp_path, dataset
+):
+    transport(monkeypatch)
+    photos, source = dataset
+    settings = Settings()
+    result = recognize(source, photos, tmp_path, settings, cache_dir=tmp_path / "cache")
+    directory = tmp_path / "runs"
+    save_run(Photo(name_file=source.name, model="A"), source, settings, result, directory)
+    path = next(directory.glob("*.json"))
+    historical = read_json(path)
+    historical["photo"]["retired_field"] = "old value"
+    historical["result"]["prediction"]["retired_field"] = "old value"
+    write_json(path, historical)
+    before = path.read_bytes()
+
+    run = load_runs(directory)[0]
+    assert set(run["photo"]) == {"name_file", "model", "color", "configuration"}
+    assert set(run["result"]["prediction"]) == {"model", "color", "configuration"}
+    assert summarize([run])[0]["model accuracy"] == 1
+    assert path.read_bytes() == before
 
 
 def test_streamlit_empty_test_set(monkeypatch, tmp_path, dataset):
@@ -310,7 +376,7 @@ def test_content_hash_excludes_copies(monkeypatch, tmp_path, dataset):
     photos, source = dataset
     source.write_bytes((tmp_path / photos[2].name_file).read_bytes())
     decision = {
-        "prediction": {"model": "A", "color": None, "configuration": None, "orientation": None},
+        "prediction": {"model": "A", "color": None, "configuration": None},
         "ranked_models": ["A"],
     }
     requests = transport(monkeypatch, decision)
@@ -334,7 +400,7 @@ def test_streamlit_navigation_automatically_recognizes(monkeypatch, tmp_path, da
     def fake_recognize(source, *args, **kwargs):
         recognized.append(source.name)
         return Recognition(
-            prediction=Prediction(model="A", color=None, configuration=None, orientation=None),
+            prediction=Prediction(model="A", color=None, configuration=None),
             candidates=[Candidate(model="A", name_file=photos[1].name_file)],
             calls=[CallStats(cached=True, cost_usd=0)],
             seconds=0.1,
