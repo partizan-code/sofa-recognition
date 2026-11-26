@@ -88,14 +88,8 @@ def sidebar() -> tuple[Settings, dict[str, str], bool]:
     )
 
 
-def show_result(result: Recognition, photo: Photo, source, catalog, root) -> None:
-    left, right = st.columns(2)
-    with left:
-        st.subheader("Исходное фото")
-        with open_rgb(source) as image:
-            st.image(image, caption=photo.name_file, width="stretch")
-    with right:
-        st.subheader("Распознанная модель")
+def show_result(result: Recognition, photo: Photo, source, catalog, root, reference) -> None:
+    with reference.container():
         match = next(
             (
                 p
@@ -266,10 +260,20 @@ def render() -> None:
         photo = dataset[selected]
         source = test_root / photo.name_file
         try:
+            manual = st.button("Распознать / повторить без кэша")
+            left, right = st.columns(2)
+            with left:
+                st.subheader("Исходное фото")
+                with open_rgb(source) as image:
+                    st.image(image, caption=photo.name_file, width="stretch")
+            with right:
+                st.subheader("Распознанная модель")
+                reference = st.empty()
+                reference.info("Эталон появится после анализа.")
+            details = st.empty()
             identity = digest(
                 [experiment_key(settings, photos, root), file_digest(source), photo.truth()]
             )
-            manual = st.button("Распознать / повторить без кэша")
             if manual or (auto and st.session_state.get("attempt") != identity):
                 st.session_state["attempt"] = identity
                 st.session_state.pop("current", None)
@@ -279,10 +283,8 @@ def render() -> None:
                     st.session_state["current"] = (identity, result)
             current = st.session_state.get("current")
             if current and current[0] == identity:
-                show_result(current[1], photo, source, photos, root)
-            else:
-                with open_rgb(source) as image:
-                    st.image(image, caption=photo.name_file, width=650)
+                with details.container():
+                    show_result(current[1], photo, source, photos, root, reference)
         except Exception as error:
             show_error(error, f"{photo.name_file}: {settings.mode}")
         with st.expander("Пакетное сравнение методов"):

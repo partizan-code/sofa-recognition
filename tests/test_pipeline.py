@@ -2,6 +2,7 @@
 
 import json
 from functools import partial
+from types import SimpleNamespace
 
 import httpx
 import numpy as np
@@ -10,6 +11,7 @@ from PIL import Image
 from streamlit.testing.v1 import AppTest
 
 import config
+import ui
 from catalog import load_photos
 from embedding_client import OpenRouterEmbeddings, normalize
 from evaluation import load_runs, save_run, summarize
@@ -418,6 +420,60 @@ def test_streamlit_navigation_automatically_recognizes(monkeypatch, tmp_path, da
     assert len(recognized) == 2  # unrelated rerender does not issue another request
     next(b for b in app.button if b.label == "← Назад").click().run()
     assert not app.exception and recognized[-1] == photos[0].name_file
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_uploaded_photo_is_shown_before_analysis(monkeypatch, tmp_path, dataset, fail):
+    photos, source = dataset
+    manifest = tmp_path / "catalog.json"
+    write_json(manifest, [p.model_dump(by_alias=True) for p in photos])
+    monkeypatch.setattr(config, "ROOT", tmp_path)
+    monkeypatch.setattr(config, "CATALOG_FILE", manifest)
+    monkeypatch.setattr(config, "TEST_FILE", tmp_path / "empty/test.json")
+    monkeypatch.setattr(config, "INDEX_DIR", tmp_path / "indexes")
+    monkeypatch.setattr("ui.load_runs", lambda: [])
+    monkeypatch.setattr("ui.save_run", lambda *a: None)
+    uploaded = SimpleNamespace(name=source.name, getvalue=source.read_bytes)
+    monkeypatch.setattr(ui.st, "file_uploader", lambda *a, **kw: uploaded)
+    events = []
+    original_image = ui.st.image
+
+    def show_image(image, **kwargs):
+        events.append(("image", kwargs["caption"]))
+        return original_image(image, **kwargs)
+
+    def fake_recognize(path, *args, **kwargs):
+        # The source must already be rendered when the blocking analysis begins.
+        assert events == [("image", path.name)]
+        events.append(("analysis", path.name))
+        if fail:
+            raise ValueError("Offline analysis failed")
+        return Recognition(
+            prediction=Prediction(model="A", color=None, configuration=None),
+            candidates=[Candidate(model="A", name_file=photos[0].name_file)],
+            calls=[],
+            seconds=0.1,
+            experiment="offline",
+        )
+
+    monkeypatch.setattr(ui.st, "image", show_image)
+    monkeypatch.setattr("ui.recognize", fake_recognize)
+    app = AppTest.from_string("from ui import render\nrender()").run(timeout=20)
+    app.radio[0].set_value("Загрузить фото").run()
+    assert not app.exception
+    assert [event[0] for event in events[:2]] == ["image", "analysis"]
+    if fail:
+        assert len(events) == 2
+        assert any("Offline analysis failed" in item.value for item in app.error)
+    else:
+        assert events[2] == ("image", f"A · {photos[0].name_file}")
+        assert len(app.get("imgs")) == 3  # source, chosen reference, candidate
+
+    events.clear()
+    uploaded.getvalue = (tmp_path / photos[2].name_file).read_bytes
+    app.run()
+    assert not app.exception
+    assert [event[0] for event in events[:2]] == ["image", "analysis"]
 
 
 def test_summary_common_samples_only(monkeypatch, tmp_path, dataset):
