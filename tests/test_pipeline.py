@@ -467,7 +467,7 @@ def test_uploaded_photo_is_shown_before_analysis(monkeypatch, tmp_path, dataset,
         assert any("Offline analysis failed" in item.value for item in app.error)
     else:
         assert events[2] == ("image", f"A · {photos[0].name_file}")
-        assert len(app.get("imgs")) == 3  # source, chosen reference, candidate
+        assert len(app.image) == 3  # source, chosen reference, candidate
 
     events.clear()
     uploaded.getvalue = (tmp_path / photos[2].name_file).read_bytes
